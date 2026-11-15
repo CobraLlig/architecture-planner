@@ -52,6 +52,7 @@ export function initUI({ editor, view3d, setViewMode }) {
   editor.on('toast', (m) => toast(m, 5000));
   store.onSaveError = () => toast('Autosave is full (large imports). Use Save to keep your work as a file.', 6000);
   $('#btn-help').onclick = () => openHelp();
+  buildFileMenu(editor);
   // small screens: furniture / properties open as drawers
   const drawer = (name, other) => { document.body.classList.toggle(name); document.body.classList.remove(other); };
   $('#btn-lib').onclick = () => drawer('show-lib', 'show-insp');
@@ -93,6 +94,29 @@ export function initUI({ editor, view3d, setViewMode }) {
   $('#undo').disabled = true; $('#redo').disabled = true;
   editor.emit('view');
   return { refreshAll };
+}
+
+// ---- File menu (tablet & phone): file actions, units, grid and layout in one place --------
+function buildFileMenu(editor) {
+  const menu = $('#filemenu'), btn = $('#btn-file');
+  const item = (label, fn) => el('button', { class: 'menuitem', onclick: () => { menu.hidden = true; fn(); } }, label);
+  const draw = () => {
+    menu.innerHTML = '';
+    const units = el('select', {}, [['imperial', 'ft · in'], ['metric', 'metric']].map(([v, t]) => el('option', { value: v, selected: store.project.units === v }, t)));
+    units.onchange = () => { const u = $('#unitsel'); u.value = units.value; u.onchange({ target: u }); };
+    const grid = el('input', { type: 'checkbox', checked: editor.gridOn });
+    grid.onchange = () => $('#grid').click();
+    const lay = el('select', {}, [['auto', 'Automatic'], ['desktop', 'Desktop'], ['tablet', 'Tablet (iPad)'], ['phone', 'Phone']].map(([v, t]) => el('option', { value: v, selected: window.getLayoutPref?.() === v }, t)));
+    lay.onchange = () => { window.setLayoutPref(lay.value); menu.hidden = true; setTimeout(() => editor.resize(), 50); };
+    menu.append(
+      item('New plan', () => $('#btn-new').click()), item('Open…', () => $('#btn-open').click()),
+      item('Import a plan or scan…', () => openImport(editor)), item('Save to file', () => $('#btn-save').click()),
+      el('div', { class: 'menusep' }),
+      el('div', { class: 'menurow' }, 'Units', units), el('div', { class: 'menurow' }, 'Show grid', grid), el('div', { class: 'menurow' }, 'Layout', lay),
+    );
+  };
+  btn.onclick = (e) => { e.stopPropagation(); if (menu.hidden) draw(); menu.hidden = !menu.hidden; };
+  document.addEventListener('pointerdown', (e) => { if (!menu.hidden && !menu.contains(e.target) && !btn.contains(e.target)) menu.hidden = true; });
 }
 
 function syncHeader(editor) {
@@ -446,6 +470,7 @@ function openHelp() {
     phase('', 'Phase 4 — Construction documents & renders', 'Build-ready sets and pictures.', ['Elevations, sections and wall/detail callouts', 'Sheet sets with titleblocks, PDF export', 'Materials & lighting, exterior renders', 'IFC / DXF import–export for engineers']),
   );
   const install = el('div', { style: 'margin-bottom:14px;color:#3d4450;line-height:1.5' },
+    el('b', {}, 'Layouts. '), 'The screen arranges itself for your device — desktop, iPad (landscape or portrait) or phone. Change it under File ▾ → Layout. ', el('b', {}, 'Apple Pencil: '), 'draws and selects precisely (drag on empty space to box-select); fingers pan and pinch-zoom.', el('br'), el('br'),
     el('b', {}, 'Use it on any device. '), 'Open the site, then: ', el('b', {}, 'Android / Chrome / Edge'), ' — tap Install (top bar) or the browser menu → Install app. ', el('b', {}, 'iPhone / iPad (Safari)'), ' — Share → Add to Home Screen. Once installed it works offline. Your plans are saved on each device; use Save / Open to move a plan between devices.',
     el('br'), el('b', {}, 'Touch: '), 'tap to select or place; drag to move; one finger on empty space pans; two fingers pan and pinch-zoom; the ▢ button box-selects. Pick a tool, then drag to position the preview and lift to place.');
   openModal('Shortcuts, install & roadmap', el('div', {}, el('h4', { style: 'margin:0 0 8px' }, 'Install & touch'), install, el('h4', { style: 'margin:0 0 8px' }, 'Shortcuts'), kg, el('h4', { style: 'margin:0 0 8px' }, 'Roadmap'), road, el('div', { style: 'margin-top:12px;color:#9aa2ad;font-size:11.5px' }, `Build ${BUILD}`)));

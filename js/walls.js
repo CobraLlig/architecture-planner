@@ -1,7 +1,7 @@
 // Wall network logic: joins, openings cut-outs, enclosed-room detection.
 
 import {
-  dist, sub, norm, leftN, closestOnSeg, segIntersect, lineIntersect, polyArea, pointInPoly, offsetPoly, clamp,
+  dist, sub, norm, leftN, closestOnSeg, segIntersect, lineIntersect, polyArea, pointInPoly, offsetPoly, clamp, polyCentroid,
 } from './geom.js';
 
 export const nodeKey = (p) => `${Math.round(p.x * 2)},${Math.round(p.y * 2)}`;
@@ -249,4 +249,31 @@ export function polysFor(store, levelId) {
   const v = computeWallPolys(wallsOnLevel(store, levelId));
   polysFor._c = { key, v };
   return v;
+}
+
+/** Rooms are anchored by a seed point inside an enclosed area. After walls change, make sure each room still sits in
+ *  its own area: remember which walls/where it was, and if the seed fell outside, re-seed into the best-matching area. */
+export function reconcileRooms(store, levelId, labelPoint) {
+  const rooms = store.list('room', levelId);
+  if (!rooms.length) return;
+  const faces = computeFaces(wallsOnLevel(store, levelId));
+  const claimed = new Set();
+  const pending = [];
+  const info = (r, f) => { r.wallIds = f.wallIds; r.cen = polyCentroid(f.pts); r.area = f.area; };
+  for (const r of rooms) {
+    const f = faces.filter((x) => !claimed.has(x) && pointInPoly(r.seed, x.pts)).sort((a, b) => a.area - b.area)[0];
+    if (f) { claimed.add(f); info(r, f); } else pending.push(r);
+  }
+  for (const r of pending) {
+    let best = null;
+    for (const f of faces) {
+      if (claimed.has(f)) continue;
+      const a = new Set(r.wallIds || []), b = new Set(f.wallIds);
+      const inter = [...a].filter((x) => b.has(x)).length, union = new Set([...a, ...b]).size || 1;
+      let score = inter / union;
+      if (r.cen) score += 0.5 * Math.max(0, 1 - dist(r.cen, polyCentroid(f.pts)) / (2 * Math.sqrt(r.area || f.area)));
+      if (!best || score > best.score) best = { f, score };
+    }
+    if (best && best.score >= 0.45) { claimed.add(best.f); r.seed = labelPoint ? labelPoint(best.f.inner) : polyCentroid(best.f.inner); info(r, best.f); }
+  }
 }

@@ -106,3 +106,8 @@ if ('serviceWorker' in navigator && swAllowed) {
   navigator.storage?.persist?.().catch(() => {});
 }
 window.__plan.build = BUILD;
+
+// keep the layout classes right when the window / orientation changes, and stop iOS page-pinch outside the canvas
+window.addEventListener('resize', () => { window.applyLayout?.(); });
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+document.addEventListener('gesturechange', (e) => e.preventDefault());

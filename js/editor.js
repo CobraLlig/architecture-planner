@@ -3,7 +3,7 @@
 import { store, DEFAULTS } from './store.js';
 import { units, fmtLen, parseLen, IN, FT } from './units.js';
 import * as G from './geom.js';
-import { normalizeWalls, wallsOnLevel, polysFor, faceAt, facesFor, wallInfo, nodeKey } from './walls.js';
+import { normalizeWalls, wallsOnLevel, polysFor, faceAt, facesFor, wallInfo, nodeKey, reconcileRooms } from './walls.js';
 import { drawPlan, entityOutline, handlesFor, roomGeom, labelPoint, doorGeom, textBounds, THEME } from './render2d.js';
 import { byId } from './library.js';
 import { refSnapPoints, hitRef, scaleRefAbout, rotateRefAbout, refCorners, setRefRedraw } from './refs.js';
@@ -54,7 +54,6 @@ export class Editor {
     this.pinch = null;
     this.touchEnded = false;
     this.marqueeMode = false;
-    this.coarse = !!window.matchMedia?.('(pointer: coarse)').matches;
     this.dirty = true;
     this.numEl = document.getElementById('numentry');
     this.textEl = document.getElementById('textentry');
@@ -79,6 +78,7 @@ export class Editor {
   emit(name, ...a) { for (const fn of this.handlers[name] || []) fn(...a); }
   requestRender() { this.dirty = true; }
   get s() { return this.view.s; }
+  get coarse() { return document.body.classList.contains('coarse'); }
   get level() { return store.level; }
 
   // ---- view ------------------------------------------------------------------
@@ -437,7 +437,7 @@ export class Editor {
     const d = this.drag;
     if (d) {
       if (d.type === 'handle' && !d.dirty) store.cancelCheckpoint();
-      else if (d.started) { normalizeWalls(store, this.level.id); store.commit(); }
+      else if (d.started) { normalizeWalls(store, this.level.id); reconcileRooms(store, this.level.id, labelPoint); store.commit(); }
       this.drag = null;
     }
     const [a, b] = [...this.pointers.values()];
@@ -491,6 +491,7 @@ export class Editor {
       store.cancelCheckpoint();
     } else if (d.started) {
       normalizeWalls(store, this.level.id);
+      reconcileRooms(store, this.level.id, labelPoint);
       store.commit();
     }
     if (d.deferSelect !== undefined && !d.started) this.setSelection(d.deferSelect);
@@ -545,6 +546,7 @@ export class Editor {
   beginMove(raw, hitId, deferSelect) {
     const ids = [...this.selection];
     const lv = this.level.id;
+    reconcileRooms(store, lv, labelPoint);
     const items = ids.map((i) => store.get(i)).filter(Boolean);
     // single opening: slide along walls
     if (items.length === 1 && items[0].type === 'opening') {
@@ -562,7 +564,13 @@ export class Editor {
       if (it.type === 'furniture' || it.type === 'text' || it.type === 'ref') moves.push({ e: it, x: it.x, y: it.y });
       else if (it.type === 'dim') moves.push({ e: it, a: { ...it.a }, b: { ...it.b }, mA: true, mB: true });
     }
-    if (!moves.length) { this.drag = null; return; }
+    // rooms: the selected ones, plus any room whose surrounding walls are all moving as a whole
+    const movedWalls = new Set(moves.filter((m) => m.e.type === 'wall' && m.mA && m.mB).map((m) => m.e.id));
+    for (const r of store.list('room', lv)) {
+      const wholeRoom = r.wallIds?.length && r.wallIds.every((id) => movedWalls.has(id));
+      if (this.selection.has(r.id) || wholeRoom) moves.push({ e: r, seed: { ...r.seed } });
+    }
+    if (!moves.length || moves.every((m) => m.e.type === 'room')) { this.drag = null; return; }
     const hitE = store.get(hitId);
     const ref = hitE?.type === 'furniture' ? { x: hitE.x, y: hitE.y } : { ...raw };
     this.drag = { type: 'move', moves, start: raw, ref, started: false, sp: { ...this.mouse }, exclude: new Set(moves.filter((m) => m.e.type === 'wall').map((m) => m.e.id)), deferSelect };
@@ -587,6 +595,8 @@ export class Editor {
         if (it.type === 'wall' || it.type === 'dim') {
           if (m.mA) it.a = { x: m.a.x + dx, y: m.a.y + dy };
           if (m.mB) it.b = { x: m.b.x + dx, y: m.b.y + dy };
+        } else if (it.type === 'room') {
+          it.seed = { x: m.seed.x + dx, y: m.seed.y + dy };
         } else { it.x = m.x + dx; it.y = m.y + dy; }
       }
       store.changed();
@@ -919,7 +929,9 @@ export class Editor {
     const off = 450 * this._pasteN;
     const map = {}, out = [];
     store.checkpoint();
+    const hasWalls = clipboard.some((c) => c.type === 'wall');
     for (const src of clipboard.filter((c) => c.type !== 'opening')) {
+      if (src.type === 'room' && !hasWalls) continue;
       const { id: _id, ...rest } = JSON.parse(JSON.stringify(src));
       const ne = store.add(rest.type, rest);
       ne.level = this.level.id;
@@ -944,6 +956,7 @@ export class Editor {
   nudge(dx, dy) {
     const items = this.selected();
     if (!items.length) return false;
+    reconcileRooms(store, this.level.id, labelPoint);
     store.checkpoint();
     const nodes = new Set();
     for (const it of items) if (it.type === 'wall') { nodes.add(nodeKey(it.a)); nodes.add(nodeKey(it.b)); }
@@ -955,6 +968,11 @@ export class Editor {
       if (it.type === 'furniture' || it.type === 'text') { it.x += dx; it.y += dy; }
       if (it.type === 'dim') { it.a = G.add(it.a, { x: dx, y: dy }); it.b = G.add(it.b, { x: dx, y: dy }); }
     }
+    const movedIds = new Set(items.filter((i) => i.type === 'wall').map((i) => i.id));
+    for (const r of store.list('room', this.level.id)) {
+      if (this.selection.has(r.id) || (r.wallIds?.length && r.wallIds.every((id) => movedIds.has(id)))) r.seed = { x: r.seed.x + dx, y: r.seed.y + dy };
+    }
+    reconcileRooms(store, this.level.id, labelPoint);
     store.commit();
     return true;
   }
@@ -978,7 +996,7 @@ export class Editor {
       else if (k === 'c') { this.copy(); }
       else if (k === 'v') { e.preventDefault(); this.paste(); }
       else if (k === 'd') { e.preventDefault(); this.duplicate(); }
-      else if (k === 'a') { e.preventDefault(); this.setTool('select'); this.setSelection(store.list(null, this.level.id).filter((x) => x.type !== 'room' && x.type !== 'ref').map((x) => x.id)); }
+      else if (k === 'a') { e.preventDefault(); this.setTool('select'); this.setSelection(store.list(null, this.level.id).filter((x) => x.type !== 'ref').map((x) => x.id)); }
       return;
     }
     if (e.code === 'Space') { this.space = true; this.updateCursor(); e.preventDefault(); return; }

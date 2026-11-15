@@ -1,7 +1,7 @@
 // Service worker: precaches the whole app so it opens and works with no connection.
 // The block below is rewritten by `node build.mjs`.
 /*BUILD:START*/
-const VERSION = '43be9770';
+const VERSION = 'a9739a7a';
 const FILES = [
  "./",
  "./css/app.css",
@@ -20,6 +20,7 @@ const FILES = [
  "./js/import/roomplan.js",
  "./js/import/svg.js",
  "./js/importer.js",
+ "./js/layout.js",
  "./js/library.js",
  "./js/main.js",
  "./js/refs.js",
