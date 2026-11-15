@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan — Architectural Planner</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6df6'/%3E%3Cpath d='M7 25V7h18v18zM7 15h10v10' fill='none' stroke='white' stroke-width='2.4' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand"><svg viewBox="0 0 32 32" width="26" height="26"><rect width="32" height="32" rx="7" fill="#2f6df6"/><path d="M7 25V7h18v18zM7 15h10v10" fill="none" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/></svg><span>Plan</span></div>
+    <input id="projname" class="projname" spellcheck="false" title="Project name">
+    <div class="seg" id="disciplines" title="Building systems">
+      <button class="on" data-d="layout">Layout</button>
+      <button disabled title="Phase 2 — outlets, switches, lights, panel, circuits">Electrical <i>soon</i></button>
+      <button disabled title="Phase 2 — fixtures, supply & drain routing">Plumbing <i>soon</i></button>
+      <button disabled title="Phase 3 — footings, beams, columns, load paths">Structural <i>soon</i></button>
+    </div>
+    <div class="spacer"></div>
+    <div class="group">
+      <button id="undo" class="ib" title="Undo (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M9 7 4 12l5 5M4 12h10a6 6 0 0 1 0 12h-3" transform="translate(0 -3)"/></svg></button>
+      <button id="redo" class="ib" title="Redo (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="m15 7 5 5-5 5M20 12H10a6 6 0 0 0 0 12h3" transform="translate(0 -3)"/></svg></button>
+    </div>
+    <div class="seg" id="viewmode">
+      <button data-v="plan" class="on" title="2D plan">Plan</button>
+      <button data-v="split" title="Plan and 3D side by side">Split</button>
+      <button data-v="3d" title="3D model (press 3)">3D</button>
+    </div>
+    <select id="unitsel" title="Units"><option value="imperial">ft · in</option><option value="metric">metric</option></select>
+    <label class="chk" title="Snap to points and grid (hold Alt to bypass)"><input type="checkbox" id="snap" checked> Snap</label>
+    <label class="chk"><input type="checkbox" id="grid" checked> Grid</label>
+    <div class="group">
+      <button id="btn-new" class="tb">New</button>
+      <button id="btn-open" class="tb">Open</button>
+      <button id="btn-import" class="tb" title="Import a DXF, PDF, scan, image or LiDAR file">Import…</button>
+      <button id="btn-save" class="tb">Save</button>
+    </div>
+    <button id="btn-sheet" class="primary">Print sheet…</button>
+    <button id="btn-help" class="ib" title="Shortcuts & roadmap"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.6 2.2c-.8.4-1.2 1-1.2 1.9M12 17v.1"/></svg></button>
+    <input type="file" id="fileinput" accept=".json,.archplan,application/json" hidden>
+  </header>
+
+  <div id="body">
+    <nav id="tools"></nav>
+    <aside id="library">
+      <div class="panel-h">Furniture &amp; fixtures</div>
+      <input id="libsearch" type="search" placeholder="Search…" spellcheck="false">
+      <div id="liblist"></div>
+    </aside>
+
+    <main id="stage">
+      <div id="optionsbar"></div>
+      <div id="views">
+        <section id="wrap2d">
+          <canvas id="c2d" tabindex="0"></canvas>
+          <input id="numentry" type="text" spellcheck="false" autocomplete="off" placeholder="length">
+          <textarea id="textentry" rows="2" spellcheck="false" placeholder="Type a note…"></textarea>
+          <div class="floaty" id="zoomctl">
+            <button id="zin" title="Zoom in (+)">+</button><button id="zout" title="Zoom out (-)">−</button><button id="zfit" title="Fit to plan (0)">⤢</button>
+          </div>
+        </section>
+        <section id="wrap3d">
+          <div class="floaty" id="ctl3d">
+            <button id="c3fit" title="Reset camera">Fit</button>
+            <label class="chk"><input type="checkbox" id="c3roof"> Roof</label>
+            <label class="chk"><input type="checkbox" id="c3cut"> Hide levels above</label>
+            <label class="chk" title="Sun direction">Sun <input type="range" id="c3sun" min="0" max="360" value="215"></label>
+            <button id="c3png" title="Save a PNG image of this view">Capture image</button>
+          </div>
+          <div class="hint3d">Drag to orbit · right-drag to pan · scroll to zoom</div>
+        </section>
+      </div>
+    </main>
+
+    <aside id="inspector">
+      <div class="panel-h" id="insp-title">Properties</div>
+      <div id="props"></div>
+      <div class="panel-h">Layers</div>
+      <div id="layers"></div>
+      <div class="panel-h">References <span style="font-weight:400;text-transform:none;letter-spacing:0">(trace over)</span></div>
+      <div id="refs"></div>
+      <div class="panel-h">Level</div>
+      <div id="levelprops"></div>
+    </aside>
+  </div>
+
+  <footer id="statusbar">
+    <div id="levels"></div>
+    <div id="hint"></div>
+    <div id="coords"></div>
+    <div id="zoomread"></div>
+  </footer>
+</div>
+
+<div id="dropveil" hidden><div>Drop to import</div></div>
+<div id="modal" hidden><div class="modal-card" id="modalcard"></div></div>
+<div id="toast" hidden></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
