@@ -1,0 +1,29 @@
+{
+  "name": "Plan — Architectural Planner",
+  "short_name": "Plan",
+  "description": "Draft floor plans, furnish them, view in 3D, print to scale, and import plans and scans.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#2f6df6",
+  "categories": ["productivity", "utilities", "design"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "image/vnd.dxf": [".dxf"],
+        "image/svg+xml": [".svg"],
+        "application/pdf": [".pdf"],
+        "application/json": [".json"]
+      }
+    }
+  ]
+}

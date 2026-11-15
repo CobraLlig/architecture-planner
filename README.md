@@ -20,6 +20,13 @@ use **Save / Open** for `.archplan.json` files.
 - Print sheets: vector SVG at true scale (1/4" = 1'-0", 1:50, …) with border, title block, north arrow, scale bar; Print / Save as PDF
 - Undo/redo, copy/paste, ft-in or metric
 
+## On phones and tablets (installable, works offline)
+
+- **Touch:** tap to select or place, drag to move, one finger on empty space pans, two fingers pan and pinch-zoom, ▢ box-selects. With a tool active, drag to position the preview and lift to place. A bar at the bottom offers Undo, Redo, Rotate, Flip swing, Duplicate, Delete, Type length and Done. Furniture and Properties open as drawers.
+- **Install:** Android/desktop Chrome and Edge show an **Install** button; on iPhone/iPad use Share → Add to Home Screen. Installed copies open from the home screen and work with no connection (everything, including 3D and PDF import, is cached).
+- **Updating:** run `node build.mjs` before every deploy. It redraws icons if missing, stamps a build id, and writes the offline file list into `sw.js` so installed copies refresh themselves ("A new version is ready — tap to reload").
+- While developing locally the service worker is off unless the address has `?sw`, so you never see stale files.
+
 ## Importing plans, scans and dimensions
 
 Use **Import…** (or drag a file onto the window).

@@ -12,9 +12,10 @@ export const el = (tag, attrs = {}, ...kids) => {
 };
 
 let toastTimer;
-export function toast(msg, ms = 2600) {
+export function toast(msg, ms = 2600, onClick = null) {
   const t = $('#toast');
   t.textContent = msg; t.hidden = false;
+  t.onclick = onClick; t.style.cursor = onClick ? 'pointer' : '';
   clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), ms);
 }
 

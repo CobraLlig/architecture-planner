@@ -50,6 +50,11 @@ export class Editor {
     this.drag = null;
     this.space = false;
     this.handlers = {};
+    this.pointers = new Map();     // active touch pointers
+    this.pinch = null;
+    this.touchEnded = false;
+    this.marqueeMode = false;
+    this.coarse = !!window.matchMedia?.('(pointer: coarse)').matches;
     this.dirty = true;
     this.numEl = document.getElementById('numentry');
     this.textEl = document.getElementById('textentry');
@@ -153,7 +158,7 @@ export class Editor {
   snap(raw, o = {}) {
     this.guides = [];
     if (!this.snapOn || o.alt) return { p: { ...raw }, kind: null };
-    const tol = 13 / this.s;
+    const tol = (this.coarse ? 20 : 13) / this.s;
     const exclude = o.exclude || new Set();
     const walls = wallsOnLevel(store, this.level.id).filter((w) => !exclude.has(w.id));
     let best = null;
@@ -254,7 +259,7 @@ export class Editor {
   hitTest(p) {
     const lv = this.level.id;
     const polys = polysFor(store, lv);
-    const tol = 6 / this.s;
+    const tol = (this.coarse ? 14 : 6) / this.s;
     const L = this.layers;
     if (L.openings) for (const o of store.list('opening', lv)) {
       const pts = entityOutline(o, polys);
@@ -298,7 +303,7 @@ export class Editor {
       }
       if (best) return best.id;
     }
-    for (const r of store.list('ref', lv)) if (hitRef(r, p, 6 / this.s)) return r.id;
+    for (const r of store.list('ref', lv)) if (hitRef(r, p, (this.coarse ? 14 : 6) / this.s)) return r.id;
     return null;
   }
 
@@ -309,7 +314,7 @@ export class Editor {
     const polys = polysFor(store, this.level.id);
     for (const h of handlesFor(e, 1 / this.s, polys)) {
       const sp = this.toScreen(h.p);
-      if (Math.hypot(sp.x - sx, sp.y - sy) <= 10) return { ...h, e };
+      if (Math.hypot(sp.x - sx, sp.y - sy) <= (this.coarse ? 24 : 10)) return { ...h, e };
     }
     return null;
   }
@@ -320,6 +325,7 @@ export class Editor {
     c.addEventListener('pointerdown', (e) => this.onDown(e));
     c.addEventListener('pointermove', (e) => this.onMove(e));
     c.addEventListener('pointerup', (e) => this.onUp(e));
+    c.addEventListener('pointercancel', (e) => this.onCancel(e));
     c.addEventListener('pointerleave', () => { this.hover = null; this.snapInfo = null; this.requestRender(); });
     c.addEventListener('dblclick', (e) => this.onDbl(e));
     c.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -344,16 +350,36 @@ export class Editor {
     this.canvas.focus?.();
     const { sx, sy } = this.pos(e);
     const raw = this.toWorld(sx, sy);
+    const touch = e.pointerType === 'touch';
+    if (touch) {
+      this.pointers.set(e.pointerId, { x: sx, y: sy });
+      try { this.capture(e); } catch { /* ignore */ }
+      if (this.pointers.size === 2) { this.beginPinch(); return; }
+      if (this.pointers.size > 2 || this.touchEnded) return;
+    }
     this.mouse = { sx, sy, p: raw };
     if (this.textEl.style.display === 'block') this.commitText();
     if (e.button === 1 || e.button === 2 || (e.button === 0 && this.space)) {
       this.drag = { type: 'pan', sx, sy, ox: this.view.ox, oy: this.view.oy, moved: false, button: e.button };
-      this.canvas.setPointerCapture(e.pointerId); this.updateCursor();
+      this.capture(e); this.updateCursor();
       return;
     }
     if (e.button !== 0) return;
-    this.canvas.setPointerCapture(e.pointerId);
+    this.capture(e);
     this.closeNum();
+    if (touch && this.tool !== 'select') {
+      // fingers cover the cursor: let the user drag to position the preview, and commit on release
+      this.drag = { type: 'touchplace', sx, sy };
+      this.updateHover(e, sx, sy, raw);
+      this.requestRender();
+      return;
+    }
+    this.toolDown(e, sx, sy, raw);
+  }
+
+  capture(e) { try { this.canvas.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ } }
+
+  toolDown(e, sx, sy, raw) {
     const t = this.tool;
     if (t === 'select') return this.downSelect(e, sx, sy, raw);
     if (t === 'wall') return this.downWall(e, raw);
@@ -368,15 +394,27 @@ export class Editor {
   onMove(e) {
     const { sx, sy } = this.pos(e);
     const raw = this.toWorld(sx, sy);
+    if (e.pointerType === 'touch') {
+      if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { x: sx, y: sy });
+      if (this.pinch) { this.updatePinch(); return; }
+      if (this.touchEnded) return;
+    }
     this.mouse = { sx, sy, p: raw, shift: e.shiftKey, alt: e.altKey };
     const d = this.drag;
     if (d?.type === 'pan') {
       this.view.ox = d.ox + (sx - d.sx); this.view.oy = d.oy + (sy - d.sy);
-      d.moved = d.moved || Math.hypot(sx - d.sx, sy - d.sy) > 3;
+      d.moved = d.moved || Math.hypot(sx - d.sx, sy - d.sy) > (e.pointerType === 'touch' ? 8 : 3);
       this.requestRender(); this.emit('view'); return;
     }
+    if (d?.type === 'touchplace') { this.updateHover(e, sx, sy, raw); this.requestRender(); return; }
     if (d) return this.dragMove(e, sx, sy, raw);
     this.emit('cursor', raw);
+    this.updateHover(e, sx, sy, raw);
+    this.requestRender();
+  }
+
+  updateHover(e, sx, sy, raw) {
+    this.mouse = { sx, sy, p: raw, shift: e.shiftKey, alt: e.altKey };
     if (this.tool === 'select') {
       const hh = this.hitHandle(sx, sy);
       const id = hh ? null : this.hitTest(raw);
@@ -387,17 +425,64 @@ export class Editor {
     } else if (this.tool === 'furniture' || this.tool === 'room' || this.tool === 'text') {
       this.snapInfo = null;
     }
-    this.requestRender();
   }
 
+  onCancel(e) {
+    if (this.drag?.type === 'touchplace') { this.drag = null; this.pointers.delete(e.pointerId); this.requestRender(); return; }
+    this.onUp(e);
+  }
+
+  // ---- two-finger pinch / pan ---------------------------------------------------
+  beginPinch() {
+    const d = this.drag;
+    if (d) {
+      if (d.type === 'handle' && !d.dirty) store.cancelCheckpoint();
+      else if (d.started) { normalizeWalls(store, this.level.id); store.commit(); }
+      this.drag = null;
+    }
+    const [a, b] = [...this.pointers.values()];
+    this.pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, s: this.view.s, ox: this.view.ox, oy: this.view.oy };
+    this.snapInfo = null;
+    this.requestRender();
+  }
+  updatePinch() {
+    if (this.pointers.size < 2 || !this.pinch) return;
+    const [a, b] = [...this.pointers.values()], p = this.pinch;
+    const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const s = G.clamp((p.s * dist) / p.dist, 0.006, 1.6);
+    const wx = (p.mx - p.ox) / p.s, wy = (p.my - p.oy) / p.s;
+    this.view.s = s; this.view.ox = mx - wx * s; this.view.oy = my - wy * s;
+    this.requestRender(); this.emit('view');
+  }
+
+  setMarquee(on) { this.marqueeMode = !!on; this.emit('marquee', this.marqueeMode); }
+
   onUp(e) {
+    if (e.pointerType === 'touch') {
+      this.pointers.delete(e.pointerId);
+      if (this.pinch) {
+        if (this.pointers.size < 2) { this.pinch = null; this.touchEnded = true; }
+        if (this.pointers.size === 0) this.touchEnded = false;
+        return;
+      }
+      if (this.touchEnded) { if (this.pointers.size === 0) this.touchEnded = false; return; }
+    }
     const d = this.drag;
     if (!d) return;
     try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
     this.drag = null;
     this.updateCursor();
+    if (d.type === 'touchplace') {
+      const { sx, sy } = this.pos(e);
+      const raw = this.toWorld(sx, sy);
+      this.updateHover(e, sx, sy, raw);
+      this.toolDown(e, sx, sy, raw);
+      this.requestRender();
+      return;
+    }
     if (d.type === 'pan') {
       if (d.button === 2 && !d.moved) this.rightClick();
+      if (d.tapClear && !d.moved) this.setSelection([]);
       return;
     }
     if (d.type === 'marquee') {
@@ -407,8 +492,6 @@ export class Editor {
     } else if (d.started) {
       normalizeWalls(store, this.level.id);
       store.commit();
-    } else if (d.type === 'click-select') {
-      // plain click on already-selected item with shift handled on down; nothing to do
     }
     if (d.deferSelect !== undefined && !d.started) this.setSelection(d.deferSelect);
     this.requestRender();
@@ -450,6 +533,10 @@ export class Editor {
       if (!wasSel) this.setSelection([id]);
       this.beginMove(raw, id, wasSel && this.selection.size > 1 ? [id] : undefined);
     } else {
+      if (e.pointerType === 'touch' && !this.marqueeMode) {
+        this.drag = { type: 'pan', sx, sy, ox: this.view.ox, oy: this.view.oy, moved: false, button: 0, tapClear: true };
+        return;
+      }
       if (!e.shiftKey) this.setSelection([]);
       this.drag = { type: 'marquee', sx, sy, x: sx, y: sy };
     }
@@ -485,7 +572,7 @@ export class Editor {
     const d = this.drag;
     if (d.type === 'marquee') { d.x = sx; d.y = sy; this.requestRender(); return; }
     if (!d.started && d.type !== 'handle') {
-      if (Math.hypot(sx - d.sp.sx, sy - d.sp.sy) < 4) return;
+      if (Math.hypot(sx - d.sp.sx, sy - d.sp.sy) < (this.coarse ? 8 : 4)) return;
       store.checkpoint(); d.started = true;
       if (d.deferSelect !== undefined) d.deferSelect = undefined;
     }
@@ -797,6 +884,18 @@ export class Editor {
     this.emit('toast', 'Scale set. Trace over the drawing with the wall tool.');
   }
 
+  /** Escape key / the touch "Done" button: back out of whatever is in progress. */
+  escape() {
+    if (this.numEl.style.display === 'block') { this.closeNum(); return; }
+    if (this.draft || this.dimDraft) { this.draft = null; this.dimDraft = null; this.emit('hint', this.hint()); }
+    else if (this.place) this.setTool('select');
+    else if (this.selection.size) this.setSelection([]);
+    else if (this.tool !== 'select') this.setTool('select');
+    this.requestRender();
+  }
+  /** Touch: open the length box for the wall being drawn (no keyboard needed to start typing). */
+  typeLength() { if (this.tool === 'wall' && this.draft) this.openNum(''); }
+
   // ---- commands --------------------------------------------------------------
   deleteSelection() {
     if (!this.selection.size) return;
@@ -886,13 +985,7 @@ export class Editor {
     // numeric entry while drawing a wall
     if (this.tool === 'wall' && this.draft && /^[0-9.'"\-]$/.test(e.key)) { e.preventDefault(); this.openNum(e.key); return; }
     const key = e.key.toLowerCase();
-    if (e.key === 'Escape') {
-      if (this.draft || this.dimDraft) { this.draft = null; this.dimDraft = null; this.emit('hint', this.hint()); }
-      else if (this.place) this.setTool('select');
-      else if (this.selection.size) this.setSelection([]);
-      else if (this.tool !== 'select') this.setTool('select');
-      this.requestRender(); return;
-    }
+    if (e.key === 'Escape') { this.escape(); return; }
     if (e.key === 'Delete' || e.key === 'Backspace') { this.deleteSelection(); e.preventDefault(); return; }
     if (e.key.startsWith('Arrow')) {
       const step = e.shiftKey ? FT : units.system === 'imperial' ? IN : 25;
@@ -928,7 +1021,7 @@ export class Editor {
     ctx.save();
     ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * oy);
     const ghost = this.buildGhost();
-    drawPlan(ctx, { levelId: this.level.id, u: 1 / s, screen: true, selection: this.selection, hover: this.tool === 'select' ? this.hover : null, layers: this.layers, ghost });
+    drawPlan(ctx, { levelId: this.level.id, u: 1 / s, screen: true, selection: this.selection, hover: this.tool === 'select' ? this.hover : null, layers: this.layers, ghost, coarse: this.coarse });
     // alignment guides
     if (this.guides.length) {
       ctx.save(); ctx.strokeStyle = 'rgba(47,109,246,.55)'; ctx.lineWidth = 1 / s; ctx.setLineDash([4 / s, 4 / s]);

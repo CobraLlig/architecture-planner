@@ -10,6 +10,7 @@ import { buildSample } from './sample.js';
 import * as G from './geom.js';
 import { $, el, toast, openModal } from './dom.js';
 import { openImport } from './importer.js';
+import { BUILD } from './version.js';
 export { toast };
 
 const ICONS = {
@@ -51,6 +52,16 @@ export function initUI({ editor, view3d, setViewMode }) {
   editor.on('toast', (m) => toast(m, 5000));
   store.onSaveError = () => toast('Autosave is full (large imports). Use Save to keep your work as a file.', 6000);
   $('#btn-help').onclick = () => openHelp();
+  // small screens: furniture / properties open as drawers
+  const drawer = (name, other) => { document.body.classList.toggle(name); document.body.classList.remove(other); };
+  $('#btn-lib').onclick = () => drawer('show-lib', 'show-insp');
+  $('#btn-insp').onclick = () => drawer('show-insp', 'show-lib');
+  $('#zsel').onclick = () => editor.setMarquee(!editor.marqueeMode);
+  editor.on('marquee', (on) => $('#zsel').classList.toggle('on', on));
+  const touchRefresh = () => renderTouchBar(editor);
+  ['selection', 'tool', 'hint'].forEach((n) => editor.on(n, touchRefresh));
+  store.subscribe(touchRefresh);
+  touchRefresh();
   $('#zin').onclick = () => editor.zoomAt(editor.w / 2, editor.h / 2, 1.3);
   $('#zout').onclick = () => editor.zoomAt(editor.w / 2, editor.h / 2, 1 / 1.3);
   $('#zfit').onclick = () => editor.fit();
@@ -89,6 +100,28 @@ function syncHeader(editor) {
   $('#unitsel').value = store.project.units;
 }
 
+// ---- touch action bar (no keyboard / right-click on a tablet or phone) ----------------
+function renderTouchBar(editor) {
+  const bar = $('#touchbar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  const add = (label, fn) => { const b = el('button', { tabindex: '-1', onclick: fn }, label); b.onmousedown = (e) => e.preventDefault(); bar.append(b); };
+  const sel = editor.selected();
+  add('↶ Undo', () => store.undo());
+  add('↷ Redo', () => store.redo());
+  if (editor.tool === 'wall' && editor.draft) add('Type length', () => editor.typeLength());
+  if ((editor.tool === 'furniture' && editor.place) || sel.some((s) => s.type === 'furniture')) add('⟳ Rotate', () => editor.rotateSelection());
+  if (editor.tool === 'door' || sel.some((s) => s.type === 'opening' && s.kind === 'door')) {
+    add('Flip swing', () => {
+      const ops = editor.selected().filter((o) => o.type === 'opening' && o.kind === 'door');
+      if (ops.length && editor.tool === 'select') store.act(() => ops.forEach((o) => (o.side = -(o.side || 1))));
+      else { editor.opts.flip = !editor.opts.flip; editor.requestRender(); }
+    });
+  }
+  if (sel.length) { add('Duplicate', () => editor.duplicate()); add('Delete', () => editor.deleteSelection()); }
+  if (editor.tool !== 'select' || editor.draft || editor.dimDraft) add(editor.draft ? 'Finish' : 'Done', () => editor.escape());
+}
+
 // ---- tool rail ---------------------------------------------------------------
 function buildTools(editor) {
   const nav = $('#tools');
@@ -121,7 +154,7 @@ function buildLibrary(editor) {
         drawSymbol(c, it, it.w, it.d, 1.1 / s, {});
         const b = el('button', { class: 'libitem', title: `${it.name} — ${fmtLen(it.w)} × ${fmtLen(it.d)}`, 'data-id': it.id, tabindex: '-1' }, cv, el('span', {}, it.name));
         b.onmousedown = (e) => e.preventDefault();
-        b.onclick = () => { editor.setTool('furniture', it.id); document.querySelectorAll('.libitem').forEach((x) => x.classList.toggle('on', x === b)); };
+        b.onclick = () => { editor.setTool('furniture', it.id); document.querySelectorAll('.libitem').forEach((x) => x.classList.toggle('on', x === b)); document.body.classList.remove('show-lib'); };
         grid.append(b);
       }
       list.append(grid);
@@ -412,7 +445,10 @@ function openHelp() {
     phase('', 'Phase 3 — Structure & recommendations', 'Structural plans and checks.', ['Footings, columns, beams, joist & truss layouts', 'Load-bearing wall flagging, span checks', 'Code-style prompts: egress, ceiling heights, stair rise/run', 'Roof designer (gable, hip, shed)']),
     phase('', 'Phase 4 — Construction documents & renders', 'Build-ready sets and pictures.', ['Elevations, sections and wall/detail callouts', 'Sheet sets with titleblocks, PDF export', 'Materials & lighting, exterior renders', 'IFC / DXF import–export for engineers']),
   );
-  openModal('Shortcuts & roadmap', el('div', {}, el('h4', { style: 'margin:0 0 8px' }, 'Shortcuts'), kg, el('h4', { style: 'margin:0 0 8px' }, 'Roadmap'), road));
+  const install = el('div', { style: 'margin-bottom:14px;color:#3d4450;line-height:1.5' },
+    el('b', {}, 'Use it on any device. '), 'Open the site, then: ', el('b', {}, 'Android / Chrome / Edge'), ' — tap Install (top bar) or the browser menu → Install app. ', el('b', {}, 'iPhone / iPad (Safari)'), ' — Share → Add to Home Screen. Once installed it works offline. Your plans are saved on each device; use Save / Open to move a plan between devices.',
+    el('br'), el('b', {}, 'Touch: '), 'tap to select or place; drag to move; one finger on empty space pans; two fingers pan and pinch-zoom; the ▢ button box-selects. Pick a tool, then drag to position the preview and lift to place.');
+  openModal('Shortcuts, install & roadmap', el('div', {}, el('h4', { style: 'margin:0 0 8px' }, 'Install & touch'), install, el('h4', { style: 'margin:0 0 8px' }, 'Shortcuts'), kg, el('h4', { style: 'margin:0 0 8px' }, 'Roadmap'), road, el('div', { style: 'margin-top:12px;color:#9aa2ad;font-size:11.5px' }, `Build ${BUILD}`)));
 }
 
 function openSheetDialog(editor) {

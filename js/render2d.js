@@ -165,7 +165,7 @@ export function drawPlan(ctx, o) {
     for (const id of selection) outlineEntity(ctx, u, id, polys, 1, 2);
     if (selection.size === 1) {
       const e = store.get([...selection][0]);
-      if (e) drawHandles(ctx, u, e, polys);
+      if (e) drawHandles(ctx, u, e, polys, o.coarse);
     }
   }
 }
@@ -436,7 +436,8 @@ export function handlesFor(e, u, polys) {
   return [];
 }
 
-function drawHandles(ctx, u, e, polys) {
+function drawHandles(ctx, u, e, polys, coarse) {
+  const k = coarse ? 1.7 : 1;
   const hs = handlesFor(e, u, polys);
   if (!hs.length) return;
   ctx.save();
@@ -448,8 +449,8 @@ function drawHandles(ctx, u, e, polys) {
   }
   for (const h of hs) {
     ctx.beginPath();
-    if (h.kind === 'rot') ctx.arc(h.p.x, h.p.y, 6 * u, 0, Math.PI * 2);
-    else ctx.rect(h.p.x - 4.5 * u, h.p.y - 4.5 * u, 9 * u, 9 * u);
+    if (h.kind === 'rot') ctx.arc(h.p.x, h.p.y, 6 * u * k, 0, Math.PI * 2);
+    else ctx.rect(h.p.x - 4.5 * u * k, h.p.y - 4.5 * u * k, 9 * u * k, 9 * u * k);
     ctx.fill(); ctx.stroke();
   }
   ctx.restore();

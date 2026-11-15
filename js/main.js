@@ -4,6 +4,7 @@ import { Editor } from './editor.js';
 import { View3D } from './view3d.js';
 import { initUI, toast } from './ui.js';
 import { openImport } from './importer.js';
+import { BUILD } from './version.js';
 
 if (!store.loadAutosave()) store.newProject();
 setSystem(store.project.units);
@@ -65,3 +66,43 @@ window.addEventListener('drop', (e) => {
   const f = e.dataTransfer.files[0];
   if (f) openImport(editor, f);
 });
+
+// tapping the drawing closes any open drawer on small screens
+document.getElementById('c2d').addEventListener('pointerdown', () => document.body.classList.remove('show-lib', 'show-insp'));
+document.getElementById('wrap3d').addEventListener('pointerdown', () => document.body.classList.remove('show-lib', 'show-insp'));
+
+// ---- install + offline -----------------------------------------------------------------
+let installEvent = null;
+const installBtn = document.getElementById('btn-install');
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; installBtn.hidden = false; });
+window.addEventListener('appinstalled', () => { installBtn.hidden = true; installEvent = null; toast('Installed. Find Plan with your other apps.'); });
+installBtn.onclick = async () => {
+  if (!installEvent) return;
+  installEvent.prompt();
+  await installEvent.userChoice.catch(() => {});
+  installEvent = null; installBtn.hidden = true;
+};
+
+// open files handed to the installed app by the OS ("Open with Plan")
+if ('launchQueue' in window) {
+  window.launchQueue.setConsumer(async (params) => {
+    for (const h of params.files || []) { try { openImport(editor, await h.getFile()); } catch (err) { console.error(err); } }
+  });
+}
+
+// service worker: caches the whole app so it works with no connection
+// (on localhost only when the address has ?sw, so development isn't served stale files)
+const swAllowed = location.protocol === 'https:' || (location.hostname === 'localhost' && location.search.includes('sw'));
+if ('serviceWorker' in navigator && swAllowed) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('./sw.js').then(() => {
+    if (!hadController) navigator.serviceWorker.ready.then(() => toast('Ready to work offline.', 3500));
+  }).catch((err) => console.warn('Offline mode unavailable:', err));
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    toast('A new version is ready. Tap here to reload.', 60000, () => { reloading = true; location.reload(); });
+  });
+  navigator.storage?.persist?.().catch(() => {});
+}
+window.__plan.build = BUILD;
